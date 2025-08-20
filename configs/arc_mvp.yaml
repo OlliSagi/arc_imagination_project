@@ -1,0 +1,38 @@
+seed: 0
+device: "cuda"
+precision: "bf16"              # or "fp16"
+
+sim2d:
+  H: 32
+  W: 32
+  C: 96                    # 10 color one-hot + 86 features
+  layers: 6
+  heads: 8
+  dim: 256
+  edit_tokens: 3
+  brush_radius: [0.08, 0.35]
+
+llm:
+  # Pick ONE you actually have access to:
+  model_name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"   # good small reasoning baseline
+  # model_name: "Qwen/Qwen2.5-7B-Instruct"
+  load_in_4bit: true
+  lora_r: 16
+  lora_alpha: 16
+  lora_dropout: 0.05
+  lora_target_modules: ["q_proj","v_proj","k_proj","o_proj"]
+
+train:
+  steps_boot: 4000
+  steps_arc: 6000
+  batch_size: 2
+  lr_sim: 1e-4
+  lr_lora: 5e-5
+  replay_size: 128
+  synthetic_curriculum: true
+
+eval:
+  attempts_per_test_input: 2
+
+paths:
+  ckpt_dir: "checkpoints"

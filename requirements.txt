@@ -1,0 +1,11 @@
+torch>=2.2.0
+transformers>=4.42.0
+accelerate>=0.30.0
+bitsandbytes>=0.44.0
+peft>=0.11.0
+einops>=0.7.0
+safetensors>=0.4.2
+PyYAML>=6.0.1
+numpy>=1.26.4
+tqdm>=4.66.2
+Pillow>=10.4.0

@@ -1,0 +1,40 @@
+seed: 0
+device: "cuda"
+precision: "bf16"   # or "fp16", "fp32"
+
+model:
+  H: 32
+  W: 32
+  C: 96
+  dim: 256
+  layers: 4
+  heads: 8
+  load_stage0_checkpoint: "proto_canvas/checkpoints/canvas_stage0.safetensors"  # optional
+  freeze_sim2d: true
+
+heads:
+  input_dim: 96         # readout dim (we use global avg over C)
+  event_classes: 3      # recolor_by_feature, mirror, translate
+  axis_classes: 2       # mirror axis: x,y
+  dy_classes: 7         # translate bins -3..3
+  dx_classes: 7
+  feature_classes: 2    # holes, area (we start with holes only)
+
+train:
+  steps: 3000
+  batch_size: 16
+  lr_heads: 0.001
+  lr_sim: 0.0001
+  log_every: 50
+  ckpt_every: 500
+  ignore_index: -100
+
+data:
+  episode_dirs:
+    - "data/synthetic"
+    - "data/synthetic2"
+
+paths:
+  out_dir: "proto_stage1"
+
+

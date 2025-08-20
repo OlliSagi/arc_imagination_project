@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>ARC Imagination Engine — How It Works</title>
+	<link rel="stylesheet" href="./globals.css" />
+</head>
+<body>
+	<header class="site-header">
+		<div class="container brand">
+			<div class="title">ARC Imagination Engine</div>
+			<div class="tag">Canvas + Planner + Readout</div>
+			<div class="tag">Closed-loop search</div>
+			<div class="tag">In-episode adaptation</div>
+		</div>
+	</header>
+
+	<main class="container">
+		<section>
+			<h1>What is this?</h1>
+			<p>
+				This document explains the system we are building to solve ARC tasks. Predictions are JSON grids (list of lists of 0–9). We keep a persistent 32×32 latent <span class="badge accent">Canvas</span> (Sim2D), apply localized <span class="badge">Brush Edits</span>, and decode to grids via a <span class="badge">Readout</span>. A <span class="badge">Planner</span> (MLP or LLM) proposes edits; a closed-loop search picks what works best on the task's train pairs before answering the test input.
+			</p>
+			<div class="diagram">
+				<div class="block col-3">Input Grid(s)</div>
+				<div class="arrow col-1">→</div>
+				<div class="block col-3">Readout Summary<br/>+ Episodic Memory</div>
+				<div class="arrow col-1">→</div>
+				<div class="block col-4">Planner (MLP or LLM)<br/>emits K edits/step</div>
+				<div class="arrow col-12">↓</div>
+				<div class="block col-12">Canvas (32×32×C) ⇄ Sim2D dynamics + Brush Edits</div>
+				<div class="arrow col-12">↓</div>
+				<div class="block col-6">Argmax over channels 0–9</div>
+				<div class="arrow col-1">→</div>
+				<div class="block col-5">Predicted Grid (JSON)</div>
+			</div>
+			<p class="callout">ARC grids are ≤30×30; our 32×32 Canvas safely covers that. We decode by taking argmax across the 10 color channels.</p>
+		</section>
+
+		<section>
+			<h2>Key components</h2>
+			<div class="grid">
+				<div class="card col-6">
+					<h3>Canvas (Sim2D)</h3>
+					<p>A persistent latent board of size 32×32×C updated by a tiny transformer. Channels 0–9 represent color logits; the remaining channels act as working memory, including optional <em>rule slots</em> for episodic knowledge.</p>
+					<ul class="clean">
+						<li><span class="badge">C ≥ 32</span> with <span class="badge">8–16 episodic</span> channels for rule vectors.</li>
+						<li>Update is differentiable: S ← S + mask × (scale × delta).</li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Brush Edit</h3>
+					<p>One localized, soft update parameterized by <code class="inline">[x, y, radius, scale, delta_vector[C]]</code>. K edits are applied per step.</p>
+					<ul class="clean">
+						<li><span class="badge">K (edits/step): 3</span></li>
+						<li><span class="badge">Steps/attempt: 8–16</span></li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Planner</h3>
+					<p>Chooses which edits to apply. Start with a tiny MLP; upgrade to a 7B LLM (Qwen2.5 or DeepSeek-R1-Distill-Qwen) that emits edit tokens, not text.</p>
+					<ul class="clean">
+						<li><span class="badge">planner: mlp | llm</span></li>
+						<li><span class="badge">in_episode_adapt</span> (LoRA steps 1–5)</li>
+						<li><span class="badge">search_over_edits</span> (R candidates)</li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Readout</h3>
+					<p>Summarizes the Canvas for the planner, and decodes the final Canvas into a grid (argmax on channels 0–9). Keeps the LLM grounded by providing compact, structured state.</p>
+				</div>
+			</div>
+		</section>
+
+		<section>
+			<h2>Learning on the fly (per task episode)</h2>
+			<p>ARC provides train pairs inside each task. We exploit them for <strong>in‑episode adaptation</strong> so the system “discovers the rule” before predicting the test grid.</p>
+			<ul class="checklist">
+				<li><span class="dot"></span> Clone planner weights → run 1–5 small LoRA gradient steps on train pairs → use adapted planner to generate edits → discard after the episode.</li>
+				<li><span class="dot"></span> Alternatively or additionally, store rule hypotheses into reserved Canvas channels (episodic memory) without weight changes.</li>
+				<li><span class="dot"></span> Roll out <strong>R</strong> candidate edit sequences and pick the one that minimizes grid error on train pairs; apply to test input.</li>
+			</ul>
+			<table class="table">
+				<tr><th>Knob</th><th>Recommended</th><th>Effect</th></tr>
+				<tr><td>adapt_steps</td><td>2</td><td>Faster inner loop, avoids overfitting</td></tr>
+				<tr><td>adapt_lr</td><td>1e-3 → 5e-4</td><td>Stability of LoRA updates</td></tr>
+				<tr><td>R (candidates)</td><td>8–32</td><td>Search breadth for hypotheses</td></tr>
+				<tr><td>attempts</td><td>3 (ARC‑AGI‑1), 2 (ARC‑AGI‑2)</td><td>Multiple independent stories per test input</td></tr>
+			</table>
+			<p class="callout">Weights reset after each episode so nothing leaks across tasks. Outer training still improves base models over time.</p>
+		</section>
+
+		<section>
+			<h2>Why combine imagination with reasoning?</h2>
+			<p>
+				Imagination gives a spatial scratchpad and controllable local edits. Reasoning (planner) forms global hypotheses and sequences edits. Closed-loop selection keeps both grounded: only sequences that reduce train-pair error survive.
+			</p>
+			<div class="grid">
+				<div class="card col-6 kpi"><div class="value">Local</div><div class="label">geometric changes, copying, symmetry</div></div>
+				<div class="card col-6 kpi"><div class="value">Global</div><div class="label">counting, parity, set/logical rules</div></div>
+			</div>
+		</section>
+
+		<section>
+			<h2>How to run</h2>
+			<p>Windows cmd, using the repo root as working dir:</p>
+			<pre><code>python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+python run_loop.py --config configs\arc_mvp.yaml
+python src\train_boot.py --config configs\arc_mvp.yaml
+
+set ARC_TRAIN_DIR=C:\Users\oy\Documents\arc_imagination_project\ARC-AGI\data\training
+python src\train_arc.py --config configs\arc_mvp.yaml
+
+python src\eval_arc.py --config configs\arc_mvp.yaml --task_dir C:\Users\oy\Documents\arc_imagination_project\ARC-AGI\data\evaluation --out_dir submissions\arc1_model
+
+set ARC_TRAIN_DIR=C:\Users\oy\Documents\arc_imagination_project\ARC-AGI-2\data\training
+python src\train_arc.py --config configs\arc_mvp.yaml
+python src\eval_arc.py --config configs\arc_mvp.yaml --task_dir C:\Users\oy\Documents\arc_imagination_project\ARC-AGI-2\data\evaluation --out_dir submissions\arc2_model</code></pre>
+			<p class="muted">Outputs are per-task JSON grids compatible with the official scorer.</p>
+		</section>
+
+		<section>
+			<h2>Switching baselines</h2>
+			<ul class="checklist">
+				<li><span class="dot"></span><strong>A</strong>: <code class="inline">use_edits=false</code> (no imagination)</li>
+				<li><span class="dot"></span><strong>B</strong>: <code class="inline">use_edits=true</code>, <code class="inline">planner=mlp</code>, <code class="inline">search_over_edits=true</code></li>
+				<li><span class="dot"></span><strong>C</strong>: <code class="inline">planner=llm</code> (Qwen2.5‑7B or DeepSeek-R1‑Distill‑Qwen‑7B, 4‑bit + LoRA + MERGE)</li>
+			</ul>
+		</section>
+
+		<section>
+			<h2>FAQ</h2>
+			<p><strong>Q: Do we need text outputs?</strong> No. The LLM emits edit tokens. Final outputs are grids.</p>
+			<p><strong>Q: Why 32×32?</strong> ARC ≤30×30. 32×32 is a safe power-of-two canvas.</p>
+			<p><strong>Q: Can it learn a task’s rule on the fly?</strong> Yes—via LoRA inner-loop updates and/or episodic memory channels, plus search-over-edits.</p>
+		</section>
+
+		<p class="footer-note">This document summarizes <em>20250819_changelog.md</em> and <em>PROJECT_PLAN.md</em> in an implementation-oriented view.</p>
+	</main>
+</body>
+</html>
+
+

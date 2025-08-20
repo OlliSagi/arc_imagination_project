@@ -1,0 +1,114 @@
+ARC-AGI-2 is exactly the right “does it actually think?” yardstick. Here’s a focused plan + code you can open in your IDE today.
+
+Download the ARC-aligned starter project
+
+What we’ll build (crisp)
+
+2D imagination engine (always-on): a tiny transformer over a 32×32 latent field (not pixels) that you can paint with differentiable “edit brushes.”
+
+Reasoner (small open LLM): reads a compact summary of the field before speaking and outputs a few edit-vectors that modify the field.
+
+ARC alignment: loaders for ARC-AGI-2 JSON tasks, trainer to make edits lawful, evaluator that writes submissions compatible with the official benchmarking harness.
+
+Runs on a single 32 GB GPU with a 7B model in 4-bit (plus the tiny Sim2D).
+
+Why ARC-AGI-2 fits this design
+
+Tasks are 2D colored grids (≤30×30) with a handful of train examples and 1–2 test inputs; success requires exact cell-level matches and you get two attempts per test input. The repo has 1,000 public training tasks and 120 public evaluation tasks, with humans averaging ~66% on the public eval set.
+
+ARC Prize provides an official benchmarking repo to run/score submissions and enforce attempt counts.
+
+Small open models to start with (fit in 32 GB)
+
+DeepSeek-R1-Distill-Qwen-7B — compact reasoning-distill that’s open and has 7B checkpoints; good for on-device step-by-step.
+
+Qwen2.5-7B-Instruct — strong open 7B generalist, good math/coding; easy to quantize.
+
+(If you later want to experiment and your VRAM allows 4-bit 24B) Mistral Magistral Small (24B) is an open “reasoning” model but likely too heavy for 32 GB with everything else; start with 7B.
+
+Project structure you just downloaded
+configs/arc_mvp.yaml     # choose 7B model; 4-bit; LoRA for online updates
+src/
+  sim2d.py               # always-on 2D latent field + soft brushes
+  readout.py             # learned queries -> conditioning vector
+  edit_head.py           # LLM hidden -> K edit tokens
+  arc_data.py            # load ARC JSON; tensorize grids
+  llm_wrapper.py         # HF loading (DeepSeek/Qwen) + PEFT/LoRA
+  train_boot.py          # next-state bootstrapping (keeps S coherent)
+  train_arc.py           # ARC-coupled trainer (grid loss; replaces LLM with tiny planner to start)
+  eval_arc.py            # runs tasks, 2 attempts, writes submissions/
+run_loop.py              # always-on demo (no LM yet)
+requirements.txt
+README.md
+
+
+It saves checkpoints as .safetensors.
+
+How to run (minimal path to “it moves” → “it trains” → “it scores”)
+
+Install & smoke test the loop
+
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python run_loop.py --config configs/arc_mvp.yaml
+
+
+You’ll see the 2D field “tick” and react to a sweeping dummy brush.
+
+Boot the imagination (coherent dynamics)
+
+python src/train_boot.py --config configs/arc_mvp.yaml
+
+
+Saves checkpoints/sim2d_boot.safetensors.
+
+Train on ARC (super simple first pass)
+Download the ARC-AGI-2 repo and set an env var:
+
+export ARC_TRAIN_DIR=/path/to/ARC-AGI-2/data/training
+python src/train_arc.py --config configs/arc_mvp.yaml
+
+
+This step uses the Sim2D + a tiny planner (standing in for the LLM edit head) to learn lawful edits that transform inputs toward outputs on training pairs. It’s intentionally small—meant to verify the mechanic.
+
+Evaluate & emit submissions
+
+python src/eval_arc.py --config configs/arc_mvp.yaml \
+  --task_dir /path/to/ARC-AGI-2/data/evaluation \
+  --out_dir submissions/my_model
+
+
+You’ll get {task_id}.json files compatible with the official scorer. To score, plug them into arc-agi-benchmarking:
+
+python src.scoring.scoring.py \
+  --task_dir /path/to/ARC-AGI-2/data/evaluation \
+  --submission_dir submissions/my_model \
+  --results_dir results/my_model
+
+How the training aligns to your idea (and what to add next)
+
+Already in the project
+
+Always-on Sim2D: ticks continuously; can be nudged by edit-tokens (the “imagination”).
+
+Readout→LLM coupling (hooks ready): llm_wrapper.py + edit_head.py let you replace the tiny planner with a real 7B.
+
+ARC-native losses: direct grid loss on color channels; two attempts per test input respected.
+
+Add next (to make it truly “co-reasoning”)
+
+Round-trip consistency: State→Text→State and Text→State→Text losses so edits are logical and summaries are grounded (stub in comments).
+
+Few-shot in-episode adaptation: use the ARC train pairs inside each task to adapt LoRA for a few steps, then predict for the test input (no leakage across tasks).
+
+Search-over-edits within attempts: inside each allowed attempt, roll out several edit sequences in the Sim2D, pick the one with best train-pair agreement, then produce the final grid.
+
+Guardrails / rules of the game
+
+Stick to the public training set for training and don’t peek at the evaluation tasks; the repo explicitly warns about leakage and intent is “2 attempts per test input; exact match only.”
+
+Why this could move the needle on ARC-AGI-2
+
+The benchmark intentionally frustrates “brute force program search,” pushing for flexible, human-like reasoning. Your always-on imagination gives the model a persistent workspace to compose deformations and check them before committing—exactly what ARC demands (symbolic interpretation, compositionality, context-dependent rules).
+
+If you want, I can wire the 7B LLM + edit head into this scaffold (keeping VRAM ≤ 32 GB via 4-bit + LoRA) and add the round-trip losses so you can run a first real end-to-end experiment.

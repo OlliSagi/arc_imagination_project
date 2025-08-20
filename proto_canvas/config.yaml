@@ -1,0 +1,28 @@
+seed: 0
+device: "cuda"
+precision: "bf16"   # or "fp16", "fp32"
+
+model:
+  H: 32
+  W: 32
+  C: 96          # 10 color channels + working memory
+  dim: 256
+  layers: 4
+  heads: 8
+  edit_tokens: 3
+  brush_radius: [0.08, 0.35]
+
+train:
+  steps: 3000
+  batch_size: 4
+  lr: 0.0001
+  log_every: 50
+  sample_every: 500
+  val_split: 0.1
+
+paths:
+  arc1_train_dir: "ARC-AGI/data/training"
+  arc2_train_dir: "ARC-AGI-2/data/training"
+  out_dir: "proto_canvas"
+
+
