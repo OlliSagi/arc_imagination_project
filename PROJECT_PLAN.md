@@ -1,9 +1,10 @@
 # ARC-AGI-2 Imagination + Reasoning Plan
 
 ## What this project does (short)
-- Always-on Sim2D: a tiny transformer that maintains a 32×32 latent field and accepts differentiable brush edits.
-- Reasoner: a small planner (placeholder) now; later a 7B open LLM (4-bit + LoRA) that reads a summary of Sim2D and emits edit tokens.
-- ARC coupling: load ARC-AGI-2 tasks, train Sim2D + planner to transform input grids into outputs, evaluate with two attempts per test input and write submissions compatible with the official scorer.
+- Always-on Sim2D: a small 32×32 latent Canvas with differentiable brush edits and a decode head to 10 colors.
+- Reasoner: a planner (MLP now, optional 7B LLM later) that proposes probes/edits and small programs over typed slots.
+- Episode solver (Stage 2): self‑play probes + belief update + explanation scoring (fit + why‑probes + stability + simplicity), then apply the chosen program to the test.
+- ARC coupling: load ARC tasks, solve each episode via the above loop, and write JSON grids compatible with the scorer.
 
 ## Goal
 Train Sim2D and the planner on the ARC training set you attached (`ARC-AGI-2/data/training`), then evaluate on the public evaluation set to produce a submission folder. Optionally swap the planner for a 7B LLM via LoRA after the Sim2D pipeline is working.
@@ -70,18 +71,19 @@ python src\eval_arc.py --config configs\arc_mvp.yaml --task_dir C:\Users\oy\Docu
 - Planner: looks at a compact summary of the Canvas (`readout.py`) and emits K brush edits each step. We start with a tiny MLP planner; later, we let a 7B LLM emit those edits for more human-like multi-step reasoning.
 - Output: predictions are grids (list of lists of ints 0–9). The evaluator writes per-task JSONs for the official scorer.
 
-## Closed-loop training track (to reduce overfitting and encourage "imagination")
-- Search-over-edits inside attempts: during training and eval, roll out R candidate edit sequences on the Canvas and pick the sequence that best reduces grid error on the train pairs (ARC-AGI-1/2 both provide train examples inside each task).
-- Stepwise improvement objective: add a small reward if an edit step decreases grid loss vs. the previous step, encouraging iterative refinement rather than one-shot mapping.
-- In-episode adaptation (few-shot): within each task episode, take 1–5 gradient steps (LoRA if using an LLM; otherwise planner+Sim2D) on the train pairs, then predict for the test input.
-- Round-trip grounding (when LLM is enabled): add State→Text→State and Text→State→Text consistency losses so explanations and edits stay aligned.
+## Closed-loop training track (sequence-first, meaning-first)
+- Self‑play probes: per episode, the agent proposes small diagnostic edits (toggle hole, axis flip, undo‑shift, stripe period shift) to test invariances/counterfactuals.
+- Belief update: maintain a belief over hypotheses/programs; update from probe outcomes and grid loss on all train pairs.
+- Explanation scoring: Score = Fit (avg train loss) + (1−Why) (probe pass) + Stability (slot variance) + Simplicity (program length/edit budget).
+- In‑episode adaptation: 1–5 tiny updates (LoRA if LLM; otherwise planner/slots) to refine the explanation within the episode; reset afterward.
+- Attempts: multiple seeds/attempts; keep the explanation with best composite score; apply once to test.
 
 ## LLM integration (optional once Canvas+planner is stable)
 - Model choice: `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` or `Qwen/Qwen2.5-7B-Instruct`.
-- Download: no manual download required—`transformers` will fetch on first use. GPU is recommended (you have one). 4-bit quantization + LoRA keeps VRAM low.
-- Enable in config: set `llm.model_name` and keep `load_in_4bit: true`. Then replace the tiny `Planner` in code with an `EditHead` fed by the LLM’s hidden state (the hooks are in `llm_wrapper.py` and `edit_head.py`).
-- Fine-tuning: train LoRA adapters jointly with Sim2D/Readout using the same grid-loss signal and the closed-loop objectives above. For ARC-AGI‑style tasks, outputs remain grids; the LLM’s role is to plan/edit, not to output text.
-- Scaling: if a 7B is insufficient, the same setup works with larger open models given more VRAM; the Canvas and training loop remain unchanged.
+- Download: `transformers` fetches on first use; use 4‑bit + LoRA for VRAM efficiency.
+- Enable in config: set `llm.model_name` (keep `load_in_4bit: true`). Use `edit_head.py` to turn LLM hidden states into probe/program tokens.
+- Fine-tuning: LoRA‑tune on ARC episodes with the Stage 2 score (fit + why‑probes + stability + simplicity). The LLM proposes probes/programs; the Canvas and episode score keep it grounded.
+- Scaling: larger models plug into the same loop; the Canvas and training remain unchanged.
 
 ## Notes & current limitations
 - The evaluator currently emits fixed 32×32 predictions; a production solver should infer exact grid sizes before writing outputs.

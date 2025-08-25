@@ -64,6 +64,48 @@ for attempt in range(A):
     prediction = apply_story_to_test(best[1], best[2])
 ```
 
+## Stage 2 — Self‑play probes, belief update, and explanation scoring
+- Goal: move from "best fit" to "meaning via sequence": try → observe → update, then decide.
+
+- Hypothesis DSL (minimal operators)
+  - Geometry: MirrorX/Y, Rotate{90,180,270}, Translate(dy,dx)
+  - Color: MapColors(feature∈{holes,area,aspect,compactness}, bins→colors)
+  - Patterns: ExtendStripes(period, phase), Tile(period_x, period_y)
+  - Relational: Copy/Move(selector∈{largest,enclosing,adjacent,majority}, to=target)
+  - Control: If(cond on slots) Then(opA) Else(opB); Compose(op1→op2→…)
+
+- Probe library (counterfactual checks)
+  - Mirror probes: mirror twice → identity; mirror across other axis → mismatch
+  - Rotate probes: rotate 4× → identity; wrong angle → mismatch
+  - Translate probes: pre‑shift by −(dy,dx); undo/redo consistency
+  - Feature recolor probes: toggle a hole / resize area; color must change as MapColors predicts
+  - Pattern probes: shift by period; extend stripes consistency; wrong period fails
+  - Relational probes: swap sizes (largest changes), break adjacency/enclosure; predicted selector should flip
+
+- Sequence loop (per episode)
+  1) Initialize belief b₀(h) over hypotheses and slots R₀
+  2) Select next probe aₜ to maximize expected information gain between top hypotheses
+  3) Apply probe (on copies), simulate edits for T steps, decode, compute probe losses
+  4) Update belief and slots: bₜ₊₁(h) ∝ bₜ(h)·exp(−Loss_probe(h)); refine Rₜ→Rₜ₊₁ (small gradient/LoRA step)
+  5) Repeat for K probes or until confidence/plateau criteria met
+  6) Decide explanation h* and slots R*: highest posterior with stability and simplicity priors
+
+- Scoring (what "best" means)
+  - Fit: mean_train CE(ŷ, y)
+  - Why: probe pass score (higher when expected invariances/counterfactuals hold)
+  - Stability: low variance of slots (axis/period/color_map bins) across train pairs
+  - Simplicity: MDL prior on program length, edit budget, mask leakage
+  - Final: Score(h) = Fit(h) + λ₁·(1−Why(h)) + λ₂·Stability(h) + λ₃·Simplicity(h)
+
+- Selection
+  - h* = argmin Score(h); apply h* once to test inputs → JSON grids
+  - Optional leave‑one‑out: fit on N−1 train pairs, check on held‑out; average to avoid one‑off hacks
+
+- Episode report (for transparency)
+  - Chosen program (DSL), slots (transform/period/color_map/selector)
+  - Probe pass/fail table with brief reasoning
+  - Per‑pair losses and stability stats
+
 ## Losses and regularizers
 - Grid loss: cross-entropy on color logits vs. ground truth grid.
 - Stepwise improvement bonus: reward negative deltas in grid loss across steps.
@@ -208,3 +250,25 @@ Note: the 2D engine is only for data generation. Inference and the core solver c
 ---
 - ARC grids are <= 30x30; 32x32 Canvas safely covers them.
 - Outputs are JSON grids written by eval scripts; no text outputs in submissions.
+
+## Concept Storyboard mode (abstract stories beyond pixels)
+- Purpose: use the same mental animation loop to reason about non‑pixel stories with nodes (concepts), edges (causal links), timelines, and magnitudes.
+- Representation on the Canvas: dedicate episodic channels to a small concept graph: node slots, edge weights/signs, and a timeline axis; visualize as a 2D board for editability and probing.
+- Same loop: propose z_story + slots → simulate updates over steps (propagate along edges over time) → probe counterfactuals → pick the simplest story that survives.
+- Slots (concept mode examples):
+  - graph: node embeddings, edge matrix (signed/weighted), community/group tags
+  - timeline: key events, delays, periodicities
+  - flows: resource/opinion/population flows between nodes
+  - evidence: confidence per edge/node from retrieval
+
+### Worked example: WWII → Gen Z (concept storyboard)
+- Goal question: implications of WWII on Generation Z.
+- Proposal: build a storyboard with nodes {WWII, postwar policy, baby boom, education expansion, tech adoption, Gen Z traits} and signed edges encoding influence.
+- Simulate: step through decades, propagate effects along edges; accumulate impacts on Gen Z nodes.
+- Probes (why):
+  - remove edge WWII→postwar policy (does downstream collapse?)
+  - flip sign on education→Gen Z tech adoption (contradiction with evidence?)
+  - shift timeline of tech adoption earlier/later (misaligns with observed milestones?)
+- Score: fit to retrieved facts (RAG), consistency across probes, simplicity (fewest explanatory edges) → pick the best storyboard and produce both the visual board and textual answer.
+
+Note: The same z_story + slots abstraction powers both pixel ARC tasks and concept storyboards; only the slot types differ.

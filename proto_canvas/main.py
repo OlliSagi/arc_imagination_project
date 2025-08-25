@@ -4,7 +4,7 @@ import argparse, json, os, random
 import numpy as np
 import torch
 
-from utils import load_config
+from src.utils import load_config
 from proto_canvas.canvas import Sim2D
 from proto_canvas.data import load_arc_grids, augment_grids, batch_from_grids
 from proto_canvas.trainer import train_step, LossWeights

@@ -11,7 +11,7 @@
 		<div class="container brand">
 			<div class="title">ARC Imagination Engine</div>
 			<div class="tag">Canvas + Planner + Readout</div>
-			<div class="tag">Closed-loop search</div>
+			<div class="tag">Self-play probes</div>
 			<div class="tag">In-episode adaptation</div>
 		</div>
 	</header>
@@ -27,7 +27,7 @@
 				<div class="arrow col-1">→</div>
 				<div class="block col-3">Readout Summary<br/>+ Episodic Memory</div>
 				<div class="arrow col-1">→</div>
-				<div class="block col-4">Planner (MLP or LLM)<br/>emits K edits/step</div>
+				<div class="block col-4">Planner (MLP or LLM)<br/>probes + programs</div>
 				<div class="arrow col-12">↓</div>
 				<div class="block col-12">Canvas (32×32×C) ⇄ Sim2D dynamics + Brush Edits</div>
 				<div class="arrow col-12">↓</div>
@@ -75,11 +75,11 @@
 
 		<section>
 			<h2>Learning on the fly (per task episode)</h2>
-			<p>ARC provides train pairs inside each task. We exploit them for <strong>in‑episode adaptation</strong> so the system “discovers the rule” before predicting the test grid.</p>
+			<p>ARC provides train pairs inside each task. We run <strong>self‑play probes</strong> (try→observe→update) so the system discovers the explanation before predicting the test grid.</p>
 			<ul class="checklist">
-				<li><span class="dot"></span> Clone planner weights → run 1–5 small LoRA gradient steps on train pairs → use adapted planner to generate edits → discard after the episode.</li>
-				<li><span class="dot"></span> Alternatively or additionally, store rule hypotheses into reserved Canvas channels (episodic memory) without weight changes.</li>
-				<li><span class="dot"></span> Roll out <strong>R</strong> candidate edit sequences and pick the one that minimizes grid error on train pairs; apply to test input.</li>
+				<li><span class="dot"></span> Probes: toggle holes, flip axis, undo‑shift, shift by period; observe outcomes.</li>
+				<li><span class="dot"></span> Belief update over hypotheses + slots; 1–5 tiny adaptation steps; reset after episode.</li>
+				<li><span class="dot"></span> Score = Fit + (1−Why) + Stability + Simplicity; apply the winning program to the test input.</li>
 			</ul>
 			<table class="table">
 				<tr><th>Knob</th><th>Recommended</th><th>Effect</th></tr>
@@ -92,13 +92,58 @@
 		</section>
 
 		<section>
-			<h2>Why combine imagination with reasoning?</h2>
+			<h2>Why self‑play imagination + reasoning?</h2>
 			<p>
-				Imagination gives a spatial scratchpad and controllable local edits. Reasoning (planner) forms global hypotheses and sequences edits. Closed-loop selection keeps both grounded: only sequences that reduce train-pair error survive.
+				Imagination gives a spatial scratchpad and controllable local edits. Reasoning (planner) proposes probes/programs. Self‑play probes + belief updates prefer explanations that fit all train pairs and pass “why” checks.
 			</p>
 			<div class="grid">
 				<div class="card col-6 kpi"><div class="value">Local</div><div class="label">geometric changes, copying, symmetry</div></div>
 				<div class="card col-6 kpi"><div class="value">Global</div><div class="label">counting, parity, set/logical rules</div></div>
+			</div>
+		</section>
+
+		<section>
+			<h2>Stages</h2>
+			<div class="grid">
+				<div class="card col-6">
+					<h3>Stage 0 — Canvas grounding</h3>
+					<ul class="clean">
+						<li><strong>Train</strong>: small conv Sim2D (state update) + decode head</li>
+						<li><strong>Objectives</strong>: recon_ce (grid CE), next_step_mse (under random edits), cycle_ce (mirror×2/rotate×4), leakage</li>
+						<li><strong>Data</strong>: ARC train inputs/outputs pooled as unlabeled states + flip/rot90 aug</li>
+						<li><strong>Outputs</strong>: canvas_stage0.safetensors, metrics.jsonl, samples/*.png</li>
+						<li><strong>Done when</strong>: recon_ce ↓≥50% & <0.8; next_step_mse ↓≥30%; cycle_ce <0.05; max_logit >0.75</li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Stage 1 — Slots & motifs</h3>
+					<ul class="clean">
+						<li><strong>Train</strong>: slot/event heads (event, axis, dy/dx, feature); optional VQ motif codes</li>
+						<li><strong>Objectives</strong>: CE for slot heads + Stage 0 losses to keep Canvas stable</li>
+						<li><strong>Data</strong>: synthetic episodes (recolor-by-feature, mirror/rotate/translate, stripes/tiling, relations)</li>
+						<li><strong>Outputs</strong>: readout_stage1.safetensors (+ sim2d_stage1 if unfrozen), metrics_stage1.jsonl</li>
+						<li><strong>Done when</strong>: event_type_acc ≥0.80; axis_acc ≥0.90; translate_acc ≥0.70; Stage 0 gates still green</li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Stage 2 — Self‑play explanation</h3>
+					<ul class="clean">
+						<li><strong>Train/Aim</strong>: episode loop that runs probes (try→observe→update), maintains belief over programs + slots</li>
+						<li><strong>How</strong>: probe policy (toggle hole / axis flip / undo‑shift / period shift), simulate on Canvas, update belief/slots</li>
+						<li><strong>Score</strong>: Fit (avg train loss) + (1−Why) (probe pass) + Stability (slot variance) + Simplicity (MDL)</li>
+						<li><strong>Outputs</strong>: episode_report.json (chosen program, slots, probe pass/fail), test JSON grids</li>
+						<li><strong>Done when</strong>: consistent episode reports; higher exact‑match on a dev slice vs. baselines</li>
+					</ul>
+				</div>
+				<div class="card col-6">
+					<h3>Stage 3 — LLM planner (optional)</h3>
+					<ul class="clean">
+						<li><strong>Train</strong>: LoRA‑tune 7B (Qwen/DeepSeek) to emit probes/programs from readout</li>
+						<li><strong>Objectives</strong>: Stage 2 score as supervision (fit + why + stability + simplicity)</li>
+						<li><strong>Data</strong>: ARC episodes; synthetic for warm‑starts</li>
+						<li><strong>Outputs</strong>: LoRA adapters (+ merged), improved episode reports and dev accuracy</li>
+					</ul>
+				</div>
 			</div>
 		</section>
 

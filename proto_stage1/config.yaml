@@ -14,11 +14,13 @@ model:
 
 heads:
   input_dim: 96         # readout dim (we use global avg over C)
-  event_classes: 3      # recolor_by_feature, mirror, translate
-  axis_classes: 2       # mirror axis: x,y
-  dy_classes: 7         # translate bins -3..3
-  dx_classes: 7
-  feature_classes: 2    # holes, area (we start with holes only)
+  event_classes: 3      # diagnostics only for now
+  axis_classes: 2       # diagnostics
+  dy_classes: 7         # diagnostics
+  dx_classes: 7         # diagnostics
+  feature_classes: 2    # diagnostics
+  z_dim: 32
+  num_predicates: 16
 
 train:
   steps: 3000
@@ -28,6 +30,11 @@ train:
   log_every: 50
   ckpt_every: 500
   ignore_index: -100
+  use_executor: true
+  w_recon: 1.0
+  w_diag: 1.0
+  w_pred_usage: 0.001
+  w_probe: 0.1
 
 data:
   episode_dirs:

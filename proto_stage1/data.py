@@ -36,8 +36,9 @@ def episodes_in_dirs(dirs: List[str]) -> List[str]:
 
 
 def collate_batch(paths: List[str], H: int, W: int, ignore_index: int) -> Dict[str, torch.Tensor]:
-    # For simplicity, take the first train pair as supervision target
+    # For simplicity, take the first train pair (supports keys 'train_pairs' or 'train') as supervision target
     xs: List[np.ndarray] = []
+    ys: List[np.ndarray] = []
     event_labels: List[int] = []
     axis_labels: List[int] = []
     dy_labels: List[int] = []
@@ -46,11 +47,17 @@ def collate_batch(paths: List[str], H: int, W: int, ignore_index: int) -> Dict[s
 
     for p in paths:
         ep = read_json(p)
-        pair = ep['train'][0]
+        pairs = ep.get('train_pairs', ep.get('train', None))
+        if not pairs:
+            continue
+        pair = pairs[0]
         x = center_pad(pair['input'], H, W)
+        y = center_pad(pair['output'], H, W)
         xs.append(x)
+        ys.append(y)
         # Labels
-        etype = ep['event']['type'][0]
+        et_types = ep.get('event', {}).get('type', [])
+        etype = et_types[0] if isinstance(et_types, list) and len(et_types) > 0 else ep.get('event', {}).get('type', 'recolor_by_feature')
         if etype == 'recolor_by_feature':
             event_labels.append(0)
             feature_labels.append(0)  # holes
@@ -59,14 +66,15 @@ def collate_batch(paths: List[str], H: int, W: int, ignore_index: int) -> Dict[s
             dx_labels.append(ignore_index)
         elif etype == 'mirror':
             event_labels.append(1)
-            axis_labels.append(0 if ep['event']['params'].get('axis','x') == 'x' else 1)
+            axis = ep.get('event', {}).get('params', {}).get('axis', 'x')
+            axis_labels.append(0 if axis == 'x' else 1)
             feature_labels.append(ignore_index)
             dy_labels.append(ignore_index)
             dx_labels.append(ignore_index)
         elif etype == 'translate':
             event_labels.append(2)
-            dy = int(ep['event']['params']['dy'])
-            dx = int(ep['event']['params']['dx'])
+            dy = int(ep.get('event', {}).get('params', {}).get('dy', 0))
+            dx = int(ep.get('event', {}).get('params', {}).get('dx', 0))
             dy_labels.append(dy + 3)
             dx_labels.append(dx + 3)
             axis_labels.append(ignore_index)
@@ -80,14 +88,22 @@ def collate_batch(paths: List[str], H: int, W: int, ignore_index: int) -> Dict[s
 
     B = len(xs)
     x_onehot = np.zeros((B, 10, H, W), dtype=np.float32)
+    y_onehot = np.zeros((B, 10, H, W), dtype=np.float32)
     for i, g in enumerate(xs):
         for y in range(H):
             for x in range(W):
                 c = int(g[y, x])
                 if 0 <= c < 10:
                     x_onehot[i, c, y, x] = 1.0
+    for i, g in enumerate(ys):
+        for y in range(H):
+            for x in range(W):
+                c = int(g[y, x])
+                if 0 <= c < 10:
+                    y_onehot[i, c, y, x] = 1.0
     return {
         'x_onehot': torch.from_numpy(x_onehot),
+        'y_onehot': torch.from_numpy(y_onehot),
         'event': torch.tensor(event_labels, dtype=torch.long),
         'axis': torch.tensor(axis_labels, dtype=torch.long),
         'dy': torch.tensor(dy_labels, dtype=torch.long),
