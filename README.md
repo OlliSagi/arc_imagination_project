@@ -1,4 +1,4 @@
-# ARC-AGI-2 Imagination+Reasoning (2D) — Starter Project
+# Generalized Event Understanding via Mental Animation
 
 This repo is a **practical scaffold** to test the "always-on imagination + text reasoning" idea directly on **ARC-AGI-2**.
 
