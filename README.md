@@ -1,5 +1,7 @@
 # GEUMA : Generalized Event Understanding via Mental Animation
 
+[Read the Research Paper (PDF)]: (https://drive.google.com/file/d/14rTbiQCK7Zm5JF75Zu35eYKvjD1AOWAi/view?)
+
 This repo is a **practical scaffold** to test the "always-on imagination + text reasoning" idea directly on **ARC-AGI-2**.
 
 - **Imagination (Sim2D):** a small always-on 2D latent field (32×32×C) updated by a transformer.
