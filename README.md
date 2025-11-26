@@ -1,6 +1,6 @@
 # GEUMA : Generalized Event Understanding via Mental Animation
 
-[Read the Research Paper (PDF)]: (https://drive.google.com/file/d/14rTbiQCK7Zm5JF75Zu35eYKvjD1AOWAi/view?)
+[Read the Research Paper (PDF)](https://drive.google.com/file/d/14rTbiQCK7Zm5JF75Zu35eYKvjD1AOWAi/view?usp=sharing)
 
 This repo is a **practical scaffold** to test the "always-on imagination + text reasoning" idea directly on **ARC-AGI-2**.
 
